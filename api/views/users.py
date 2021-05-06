@@ -36,7 +36,7 @@ utils.routing.ModelView.register(
     schemes.User,
     schemes.CreateUser,
     display_model=schemes.DisplayUser,
-    custom_methods={"post": crud.users.create_user, "patch": crud.users.patch_user, "put": crud.users.put_user},
+    custom_methods={"post": crud.users.create_user},
     post_auth=False,
     scopes={
         "get_all": ["server_management"],

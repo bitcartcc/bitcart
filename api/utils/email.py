@@ -32,6 +32,8 @@ def check_ping(host, port, user, password, email, ssl=True):  # pragma: no cover
 
 
 def send_mail(store, where, text, subject="Thank you for your purchase"):  # pragma: no cover
+    if not where:
+        return
     message_obj = MIMEMultipart()
     message_obj["Subject"] = subject
     message_obj["From"] = store.email

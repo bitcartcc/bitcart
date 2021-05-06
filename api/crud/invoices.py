@@ -1,20 +1,17 @@
 import math
 from collections import defaultdict
-from datetime import timedelta
 from decimal import Decimal
 from operator import attrgetter
-from typing import Iterable
 
 from bitcart.errors import errors
 from fastapi import HTTPException
 from sqlalchemy import select
 from starlette.datastructures import CommaSeparatedStrings
 
-from api import events, invoices, models, pagination, schemes, settings, utils
-from api.crud.products import product_add_related
-from api.crud.stores import store_add_related
+from api import events, invoices, models, schemes, settings, utils
 from api.ext.moneyformat import currency_table, round_up
 from api.logger import get_logger
+from api.utils.database import safe_db_write
 
 logger = get_logger(__name__)
 
@@ -23,34 +20,32 @@ async def create_invoice(invoice: schemes.CreateInvoice, user: schemes.User):
     logger.info("Started creating invoice")
     logger.debug(invoice)
     d = invoice.dict()
-    store = await models.Store.get(d["store_id"])
-    if not store:
-        raise HTTPException(422, f"Store {d['store_id']} doesn't exist!")
-    await store_add_related(store)
+    store = await utils.database.get_object(models.Store, d["store_id"], user)
+    if not store.wallets:
+        raise HTTPException(422, "No wallet linked")
     d["currency"] = d["currency"] or store.default_currency or "USD"
     d["expiration"] = store.checkout_settings.expiration
-    products = d.get("products", {})
+    products = d.pop("products", {})
     if isinstance(products, list):
         products = {k: 1 for k in products}
     promocode = d.get("promocode")
-    d["products"] = list(products.keys())
-    obj, wallets = await models.Invoice.create(**d)
+    obj = await utils.database.create_object(models.Invoice, d, user_id=store.user_id)
     product = None
-    if d["products"]:
-        product = await models.Product.get(d["products"][0])
-        await product_add_related(product)
+    if products:
+        product = await utils.database.get_object(models.Product, list(products.keys())[0])
     created = []
-    for key, value in products.items():  # type: ignore
-        created.append((await models.ProductxInvoice.create(invoice_id=obj.id, product_id=key, count=value)).product_id)
+    with safe_db_write():
+        for key, value in products.items():
+            created.append((await models.ProductxInvoice.create(invoice_id=obj.id, product_id=key, count=value)).product_id)
     obj.products = created
     obj.payments = []
     current_date = utils.time.now()
     discounts = []
     if product:
-        discounts = [await models.Discount.get(discount_id) for discount_id in product.discounts]
+        discounts = await utils.database.get_objects(models.Discount, product.discounts)
     discounts = list(filter(lambda x: current_date <= x.end_date, discounts))
-    await update_invoice_payments(obj, wallets, discounts, store, product, promocode)
-    add_invoice_expiration(obj)
+    with safe_db_write():
+        await update_invoice_payments(obj, store.wallets, discounts, store, product, promocode)
     return obj
 
 
@@ -129,53 +124,9 @@ async def update_invoice_payments(invoice, wallets, discounts, store, product, p
     for wallet_id in wallets:
         wallet = await models.Wallet.get(wallet_id)
         await create_payment_method(invoice, wallet, product, store, discounts, promocode)
-    await invoice_add_related(invoice)  # add payment methods with correct names and other related objects
+    await invoice.load_data()  # add payment methods with correct names and other related objects
     logger.info(f"Successfully added {len(invoice.payments)} payment methods to invoice {invoice.id}")
     await events.event_handler.publish("expired_task", {"id": invoice.id})
-
-
-def add_invoice_expiration(obj):
-    obj.expiration_seconds = obj.expiration * 60
-    date = obj.created + timedelta(seconds=obj.expiration_seconds) - utils.time.now()
-    obj.time_left = utils.time.time_diff(date)
-
-
-async def invoice_add_related(item: models.Invoice):
-    # add related products
-    if not item:
-        return
-    result = await models.ProductxInvoice.select("product_id").where(models.ProductxInvoice.invoice_id == item.id).gino.all()
-    item.products = [product_id for product_id, in result if product_id]
-    item.payments = []
-    payment_methods = (
-        await models.PaymentMethod.query.where(models.PaymentMethod.invoice_id == item.id)
-        .order_by(models.PaymentMethod.id)
-        .gino.all()
-    )
-    for index, method in get_methods_inds(payment_methods):
-        item.payments.append(await method.to_dict(index))
-    add_invoice_expiration(item)
-
-
-async def invoices_add_related(items: Iterable[models.Invoice]):
-    for item in items:
-        await invoice_add_related(item)
-    return items
-
-
-async def get_invoice(model_id: int, user: schemes.User, item: models.Invoice, internal: bool = False):
-    await invoice_add_related(item)
-    return item
-
-
-async def get_invoices(pagination: pagination.Pagination, user: schemes.User):
-    return await pagination.paginate(models.Invoice, user.id, postprocess=invoices_add_related)
-
-
-async def delete_invoice(item: schemes.Invoice, user: schemes.User):
-    await models.ProductxInvoice.delete.where(models.ProductxInvoice.invoice_id == item.id).gino.status()
-    await item.delete()
-    return item
 
 
 async def batch_invoice_action(query, settings: schemes.BatchSettings, user: schemes.User):
@@ -192,6 +143,7 @@ async def batch_invoice_action(query, settings: schemes.BatchSettings, user: sch
             if not data:  # pragma: no cover
                 continue
             invoice, method = data
+            await invoice.load_data()
             await invoices.update_status(invoice, invoices.InvoiceStatus.COMPLETE, method)
     else:
         await query.gino.status()

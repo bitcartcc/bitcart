@@ -6,7 +6,7 @@ from passlib.context import CryptContext
 from starlette.requests import Request
 from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN
 
-from api import models
+from api import models, utils
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -20,7 +20,9 @@ def get_password_hash(password):
 
 
 async def authenticate_user(email: str, password: str):
-    user = await models.User.query.where(models.User.email == email).gino.first()
+    user = await utils.database.get_object(
+        models.User, custom_query=models.User.query.where(models.User.email == email), raise_exception=False
+    )
     if not user:
         return False, 404
     if not verify_password(password, user.hashed_password):

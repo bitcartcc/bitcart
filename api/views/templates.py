@@ -2,7 +2,7 @@ from typing import Optional
 
 from fastapi import APIRouter
 
-from api import crud, models, schemes, templates, utils
+from api import models, schemes, templates, utils
 from api.utils.common import prepare_compliant_response
 
 router = APIRouter()
@@ -24,6 +24,5 @@ utils.routing.ModelView.register(
     models.Template,
     schemes.Template,
     schemes.CreateTemplate,
-    custom_methods={"post": crud.templates.create_template},
     scopes=["template_management"],
 )

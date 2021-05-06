@@ -2,7 +2,7 @@ import io
 
 import pytest
 
-from api import crud, models
+from api import models, utils
 from api.ext.export import db_to_json, json_to_csv, merge_keys
 
 
@@ -15,7 +15,7 @@ def test_merge_keys():
 @pytest.mark.asyncio
 async def test_db_to_json():
     items = await models.Invoice.query.gino.all()
-    await crud.invoices.invoices_add_related(items)
+    await utils.database.postprocess_func(items)
     json = list(db_to_json(items))
     assert len(json) == 1
     assert isinstance(json[0], dict)

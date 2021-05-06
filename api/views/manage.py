@@ -40,7 +40,7 @@ async def cleanup_logs(user: models.User = Security(utils.authorization.AuthDepe
                 os.remove(os.path.join(settings.LOG_DIR, f))
             except OSError:  # pragma: no cover
                 pass
-    return {"status": "success", "message": "Successfully started cleanup process!"}
+    return {"status": "success", "message": "Successfully cleaned up logs!"}
 
 
 @router.post("/cleanup")

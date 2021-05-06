@@ -57,15 +57,15 @@ async def send_message(message):
     await utils.redis.publish_message(constants.EVENTS_CHANNEL, message)
 
 
-async def listen(sub, channel, custom_event_handler=None):  # pragma: no cover
+async def listen(channel, custom_event_handler=None):  # pragma: no cover
     while await channel.wait_message():
         msg = await channel.get_json()
         asyncio.ensure_future(process_message(msg, custom_event_handler))
 
 
 async def start_listening(custom_event_handler=None):  # pragma: no cover
-    subscriber, channel = await utils.redis.make_subscriber(constants.EVENTS_CHANNEL)
-    await listen(subscriber, channel, custom_event_handler)
+    _, channel = await utils.redis.make_subscriber(constants.EVENTS_CHANNEL)
+    await listen(channel, custom_event_handler)
 
 
 event_handler = EventHandler(

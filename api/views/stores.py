@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Security
+from fastapi import APIRouter, Security
 
 from api import crud, models, schemes, utils
 
@@ -10,9 +10,7 @@ async def ping_email(
     model_id: int,
     user: models.User = Security(utils.authorization.AuthDependency(), scopes=["store_management"]),
 ):
-    model = await models.Store.query.where(models.Store.id == model_id).gino.first()
-    if not model:
-        raise HTTPException(404, f"Store with id {model_id} does not exist!")
+    model = await utils.database.get_object(models.Store, model_id, user)
     return utils.email.check_ping(
         model.email_host,
         model.email_port,
@@ -29,11 +27,8 @@ async def set_store_checkout_settings(
     settings: schemes.StoreCheckoutSettings,
     user: models.User = Security(utils.authorization.AuthDependency(), scopes=["store_management"]),
 ):
-    model = await models.Store.get(model_id)
-    if not model:
-        raise HTTPException(404, f"Store with id {model_id} does not exist!")
+    model = await utils.database.get_object(models.Store, model_id, user)
     await model.set_setting(settings)
-    await crud.stores.store_add_related(model)
     return model
 
 
@@ -44,10 +39,7 @@ utils.routing.ModelView.register(
     schemes.Store,
     schemes.CreateStore,
     custom_methods={
-        "get": crud.stores.get_stores,
         "get_one": crud.stores.get_store,
-        "post": crud.stores.create_store,
-        "delete": crud.stores.delete_store,
     },
     get_one_model=None,
     get_one_auth=False,

@@ -85,7 +85,7 @@ logger_client.addHandler(socket_handler)
 
 
 def get_logger_server(name):
-    return logger.getChild(name.replace("bitcart.logclient.", ""))
+    return logger.getChild(name)
 
 
 def get_logger(name):

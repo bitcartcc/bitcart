@@ -378,7 +378,7 @@ def test_categories(client: TestClient):
     assert resp.status_code == 200
     assert resp.json() == ["all"]
     assert resp2.status_code == 200
-    assert set(resp2.json()) == set(["all", "Test"])  # TODO: make endpoint output order consistent
+    assert resp2.json() == ["all", "Test"]
 
 
 def check_token(result):
@@ -688,7 +688,7 @@ def test_batch_commands(client: TestClient, token: str):
     )
     assert (
         client.post("/invoices", json={"store_id": -1, "price": 0.5}, headers={"Authorization": f"Bearer {token}"}).status_code
-        == 422
+        == 404
     )
     resp1 = client.post("/invoices", json={"store_id": 2, "price": 0.5}, headers={"Authorization": f"Bearer {token}"})
     assert resp1.status_code == 200
@@ -912,12 +912,16 @@ async def test_create_invoice_and_pay(async_client, token: str):
     data = r.json()
     invoice_id = data["id"]
     # get payment
-    payment_method = await models.PaymentMethod.query.where(models.PaymentMethod.invoice_id == invoice_id).gino.first()
+    payment_method = await utils.database.get_object(
+        models.PaymentMethod,
+        invoice_id,
+        custom_query=models.PaymentMethod.query.where(models.PaymentMethod.invoice_id == invoice_id),
+    )
     await invoices.new_payment_handler(
         DummyInstance(), None, data["payments"][0]["payment_address"], "complete", None
     )  # pay the invoice
     # validate invoice paid_currency
-    assert (await models.Invoice.get(invoice_id)).paid_currency == payment_method.currency.upper()
+    assert (await utils.database.get_object(models.Invoice, invoice_id)).paid_currency == payment_method.currency.upper()
     await async_client.delete(f"/invoices/{invoice_id}", headers={"Authorization": f"Bearer {token}"})
 
 
@@ -927,8 +931,8 @@ def test_get_public_store(client: TestClient):
         "/token",
         json={"email": "test2auth@example.com", "password": "test12345", "permissions": ["full_control"]},
     ).json()["access_token"]
-    store = client.get("/stores/2", headers={"Authorization": f"Bearer {new_token}"})
-    assert set(store.json().keys()) == {"created", "name", "default_currency", "email", "id", "user_id", "checkout_settings"}
+    # When logged in, prohibit any access to non-own objects, even if public access is available
+    assert client.get("/stores/2", headers={"Authorization": f"Bearer {new_token}"}).status_code == 404
     client.delete(f"/users/{user_id}")
     # get store without user
     store = client.get("/stores/2")

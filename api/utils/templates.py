@@ -1,4 +1,4 @@
-from api import exceptions, models, templates
+from api import exceptions, models, templates, utils
 from api.logger import get_logger
 from api.utils.common import get_object_name
 
@@ -20,7 +20,7 @@ async def get_template(name, user_id=None, obj=None):
         query = models.Template.query.where(models.Template.name == name)
     if user_id:
         query = query.where(models.Template.user_id == user_id)
-    custom_template = await query.gino.first()
+    custom_template = await utils.database.get_object(models.Template, custom_query=query, raise_exception=False)
     if custom_template:
         logger.info(f"{get_template_matching_str(name,obj)} selected custom template " f'"{custom_template.name}"')
         return templates.Template(name, custom_template.text)

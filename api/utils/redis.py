@@ -1,20 +1,16 @@
 import asyncio
+from contextlib import asynccontextmanager
 
 import aioredis
 
 from api import settings
 
 
-class WaitForRedis:  # pragma: no cover
-    async def __aenter__(self):
-        while not settings.redis_pool:
-            await asyncio.sleep(0.01)
-
-    async def __aexit__(self, exc_type, exc, tb):
-        pass
-
-
-wait_for_redis = WaitForRedis
+@asynccontextmanager
+async def wait_for_redis():  # pragma: no cover
+    while not settings.redis_pool:
+        await asyncio.sleep(0.01)
+    yield
 
 
 async def make_subscriber(name):

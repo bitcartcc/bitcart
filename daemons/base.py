@@ -526,7 +526,7 @@ class BaseDaemon:
 
     @rpc
     def get_tx_size(self, raw_tx: dict, wallet=None) -> int:
-        return self.electrum.transaction.Transaction(raw_tx).estimated_size()  # type: ignore
+        return self.electrum.transaction.Transaction(raw_tx).estimated_size()
 
     @rpc
     def get_default_fee(self, tx: Union[dict, int], wallet=None) -> float:

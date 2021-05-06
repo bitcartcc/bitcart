@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from api import crud, models, schemes, settings, utils
+from api import models, schemes, settings, utils
 from api.utils.common import prepare_compliant_response
 
 router = APIRouter()
@@ -22,6 +22,5 @@ utils.routing.ModelView.register(
     models.Notification,
     schemes.Notification,
     schemes.CreateNotification,
-    custom_methods={"post": crud.notifications.create_notification},
     scopes=["notification_management"],
 )

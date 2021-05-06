@@ -125,21 +125,20 @@ async def set_task(task_id, data):
 
 
 async def create_new_task(script, ssh_settings, is_manual):
-    async with utils.redis.wait_for_redis():
-        deploy_id = utils.common.unique_id()
-        data = {
-            "id": deploy_id,
-            "script": script,
-            "ssh_settings": ssh_settings.dict(),
-            "success": is_manual,
-            "finished": is_manual,
-            "created": utils.time.now().timestamp(),
-            "output": script if is_manual else "",
-        }
-        await set_task(deploy_id, data)
-        if not is_manual:
-            await events.event_handler.publish("deploy_task", {"id": deploy_id})
-        return data
+    deploy_id = utils.common.unique_id()
+    data = {
+        "id": deploy_id,
+        "script": script,
+        "ssh_settings": ssh_settings.dict(),
+        "success": is_manual,
+        "finished": is_manual,
+        "created": utils.time.now().timestamp(),
+        "output": script if is_manual else "",
+    }
+    await set_task(deploy_id, data)
+    if not is_manual:
+        await events.event_handler.publish("deploy_task", {"id": deploy_id})
+    return data
 
 
 async def get_task(task_id):

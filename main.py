@@ -14,7 +14,7 @@ from api.views import router
 
 logger = get_logger(__name__)
 
-app = FastAPI(title="Bitcart", version=VERSION, docs_url="/", redoc_url="/redoc", root_path=settings.ROOT_PATH)
+app = FastAPI(title="BitcartCC", version=VERSION, docs_url="/", redoc_url="/redoc", root_path=settings.ROOT_PATH)
 app.mount("/images", StaticFiles(directory="images"), name="images")
 app.include_router(router)
 app.add_middleware(

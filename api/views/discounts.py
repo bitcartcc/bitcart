@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from api import crud, models, schemes, utils
+from api import models, schemes, utils
 
 router = APIRouter()
 
@@ -10,6 +10,5 @@ utils.routing.ModelView.register(
     models.Discount,
     schemes.Discount,
     schemes.CreateDiscount,
-    custom_methods={"post": crud.discounts.create_discount},
     scopes=["discount_management"],
 )

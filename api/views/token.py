@@ -17,12 +17,8 @@ async def get_tokens(
     redirect_url: Optional[str] = None,
     permissions: List[str] = Query(None),
 ):
-    return await pagination.paginate(
-        models.Token,
-        user.id,
-        app_id=app_id,
-        redirect_url=redirect_url,
-        permissions=permissions,
+    return await utils.database.paginate_object(
+        models.Token, pagination, user, app_id=app_id, redirect_url=redirect_url, permissions=permissions
     )
 
 
@@ -40,13 +36,8 @@ async def get_token_count(
     redirect_url: Optional[str] = None,
     permissions: List[str] = Query(None),
 ):
-    return await pagination.paginate(
-        models.Token,
-        user.id,
-        app_id=app_id,
-        redirect_url=redirect_url,
-        permissions=permissions,
-        count_only=True,
+    return await utils.database.paginate_object(
+        models.Token, pagination, user, app_id=app_id, redirect_url=redirect_url, permissions=permissions, count_only=True
     )
 
 
@@ -56,11 +47,12 @@ async def patch_token(
     model: schemes.EditToken,
     user: models.User = Security(utils.authorization.AuthDependency(), scopes=["token_management"]),
 ):
-    item = await models.Token.query.where(models.Token.user_id == user.id).where(models.Token.id == model_id).gino.first()
-    if not item:
-        raise HTTPException(status_code=404, detail=f"Token with id {model_id} does not exist!")
-    with utils.database.safe_db_write():
-        await item.update(**model.dict(exclude_unset=True)).apply()
+    item = await utils.database.get_object(
+        models.Token,
+        model_id,
+        custom_query=models.Token.query.where(models.Token.user_id == user.id).where(models.Token.id == model_id),
+    )
+    await utils.database.modify_object(item, model.dict(exclude_unset=True))
     return item
 
 
@@ -69,9 +61,11 @@ async def delete_token(
     model_id: str,
     user: models.User = Security(utils.authorization.AuthDependency(), scopes=["token_management"]),
 ):
-    item = await models.Token.query.where(models.Token.user_id == user.id).where(models.Token.id == model_id).gino.first()
-    if not item:
-        raise HTTPException(status_code=404, detail=f"Token with id {model_id} does not exist!")
+    item = await utils.database.get_object(
+        models.Token,
+        model_id,
+        custom_query=models.Token.query.where(models.Token.user_id == user.id).where(models.Token.id == model_id),
+    )
     await item.delete()
     return item
 
@@ -98,7 +92,7 @@ async def create_token(
         for permission in token_data["permissions"]:
             if permission not in token.permissions:
                 raise HTTPException(403, "Not enough permissions")
-    token = await models.Token.create(**schemes.CreateDBToken(user_id=user.id, **token_data).dict())
+    token = await utils.database.create_object(models.Token, schemes.CreateDBToken(**token_data, user_id=user.id))
     return {
         **schemes.Token.from_orm(token).dict(),
         "access_token": token.id,

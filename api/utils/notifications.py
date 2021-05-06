@@ -1,7 +1,7 @@
 import notifiers
 from aiohttp import ClientSession
 
-from api import models
+from api import models, utils
 
 
 async def send_ipn(obj, status):  # pragma: no cover
@@ -15,6 +15,6 @@ async def send_ipn(obj, status):  # pragma: no cover
 
 
 async def notify(store, text):  # pragma: no cover
-    notification_providers = [await models.Notification.get(notification_id) for notification_id in store.notifications]
+    notification_providers = await utils.database.get_objects(models.Notification, store.notifications)
     for provider in notification_providers:
         notifiers.notify(provider.provider, message=text, **provider.data)

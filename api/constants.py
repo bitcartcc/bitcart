@@ -2,7 +2,7 @@ import string
 
 from bitcart import COINS as _COINS
 
-VERSION = "0.4.0.0"  # Version, used for openapi schemas and update checks
+VERSION = "0.5.0.0"  # Version, used for openapi schemas and update checks
 WEBSITE = "https://bitcartcc.com"  # BitcartCC official site
 GIT_REPO_URL = "https://github.com/bitcartcc/bitcart"  # BitcartCC github repository
 DOCKER_REPO_URL = "https://github.com/bitcartcc/bitcart-docker"  # BitcartCC Docker Packaging repository

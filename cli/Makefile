@@ -9,7 +9,7 @@ build:
 
 dist:
 	go get github.com/mitchellh/gox
-	gox --output "bitcart-cli-{{.OS}}-{{.Arch}}"
+	gox --output "dist/bitcart-cli-{{.OS}}-{{.Arch}}"
 
 release: clean dist
 

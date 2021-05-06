@@ -7,12 +7,10 @@ from fastapi import APIRouter, Depends, HTTPException, Security
 from fastapi.security import SecurityScopes
 from pydantic import BaseModel
 from pydantic import create_model as create_pydantic_model
-from sqlalchemy import distinct
 from starlette.requests import Request
 
-from api import db, events, models, pagination
+from api import db, events, models, pagination, utils
 from api.utils.authorization import AuthDependency
-from api.utils.database import safe_db_write
 
 HTTP_METHODS: List[str] = ["GET", "POST", "PUT", "PATCH", "DELETE"]
 ENDPOINTS: List[str] = ["get_all", "get_one", "get_count", "post", "put", "patch", "delete", "batch_action"]
@@ -102,7 +100,7 @@ class ModelView:
         for method in self.allowed_methods:
             method_name = method.lower()
             self.router.add_api_route(
-                paths.get(method_name),  # type: ignore
+                paths.get(method_name),
                 self.request_handlers.get(method_name)
                 or getattr(self, method_name, None)
                 or getattr(self, f"_{method_name}")(),
@@ -142,14 +140,9 @@ class ModelView:
         }
 
     async def _get_one(self, model_id: int, user: schemes.User, internal: bool = False):
-        query = self.orm_model.query
-        if self.orm_model != models.User and user:
-            query = query.where(self.orm_model.user_id == user.id)
-        item = await query.where(self.orm_model.id == model_id).gino.first()
+        item = await utils.database.get_object(self.orm_model, model_id, user)
         if self.custom_methods.get("get_one"):
             item = await self.custom_methods["get_one"](model_id, user, item, internal)
-        if not item:
-            raise HTTPException(status_code=404, detail=f"Object with id {model_id} does not exist!")
         return item
 
     def _get(self):
@@ -160,7 +153,7 @@ class ModelView:
             if self.custom_methods.get("get"):
                 return await self.custom_methods["get"](pagination, user)
             else:
-                return await pagination.paginate(self.orm_model, user.id)
+                return await utils.database.paginate_object(self.orm_model, pagination, user)
 
         return get
 
@@ -168,18 +161,14 @@ class ModelView:
         async def get_count(
             user: Union[None, ModelView.schemes.User] = Security(self.auth_dependency, scopes=self.scopes["get_count"])
         ):
-            return (
-                await (
-                    (
-                        self.orm_model.query.where(self.orm_model.user_id == user.id)
-                        if self.orm_model != models.User
-                        else self.orm_model.query
-                    )
-                    .with_only_columns([db.db.func.count(distinct(self.orm_model.id))])
-                    .order_by(None)
-                    .gino.scalar()
-                )
-                or 0
+            return await utils.database.get_scalar(
+                (
+                    self.orm_model.query.where(self.orm_model.user_id == user.id)
+                    if self.orm_model != models.User
+                    else self.orm_model.query
+                ),
+                db.db.func.count,
+                self.orm_model.id,
             )
 
         return get_count
@@ -201,11 +190,10 @@ class ModelView:
                 if self.post_auth:
                     raise
                 user = None
-            with safe_db_write():
-                if self.custom_methods.get("post"):
-                    obj = await self.custom_methods["post"](model, user)
-                else:
-                    obj = await self.orm_model.create(**model.dict())  # type: ignore # pragma: no cover
+            if self.custom_methods.get("post"):
+                obj = await self.custom_methods["post"](model, user)
+            else:
+                obj = await utils.database.create_object(self.orm_model, model, user)
             if self.background_tasks_mapping.get("post"):
                 await events.event_handler.publish(self.background_tasks_mapping["post"], {"id": obj.id})
             return obj
@@ -217,13 +205,12 @@ class ModelView:
             model_id: int,
             model: self.pydantic_model,
             user: Union[None, ModelView.schemes.User] = Security(self.auth_dependency, scopes=self.scopes["put"]),
-        ):  # type: ignore
+        ):
             item = await self._get_one(model_id, user, True)
-            with safe_db_write():
-                if self.custom_methods.get("put"):
-                    await self.custom_methods["put"](item, model, user)  # pragma: no cover
-                else:
-                    await item.update(**model.dict()).apply()  # type: ignore
+            if self.custom_methods.get("put"):
+                await self.custom_methods["put"](item, model, user)  # pragma: no cover
+            else:
+                await utils.database.modify_object(item, model.dict())
             return item
 
         return put
@@ -233,13 +220,12 @@ class ModelView:
             model_id: int,
             model: self.pydantic_model,
             user: Union[None, ModelView.schemes.User] = Security(self.auth_dependency, scopes=self.scopes["patch"]),
-        ):  # type: ignore
+        ):
             item = await self._get_one(model_id, user, True)
-            with safe_db_write():
-                if self.custom_methods.get("patch"):
-                    await self.custom_methods["patch"](item, model, user)  # pragma: no cover
-                else:
-                    await item.update(**model.dict(exclude_unset=True)).apply()  # type: ignore
+            if self.custom_methods.get("patch"):
+                await self.custom_methods["patch"](item, model, user)  # pragma: no cover
+            else:
+                await utils.database.modify_object(item, model.dict(exclude_unset=True))
             return item
 
         return patch

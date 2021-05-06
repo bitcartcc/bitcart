@@ -19,24 +19,5 @@ async def create_user(user: schemes.CreateUser, auth_user: schemes.User):
     elif auth_user and auth_user.is_superuser:
         is_superuser = user.is_superuser
     d = user.dict()
-    d["hashed_password"] = utils.authorization.get_password_hash(d.pop("password", None))
     d["is_superuser"] = is_superuser
-    return await models.User.create(**d)
-
-
-def hash_user(d: dict):
-    if "password" in d:
-        if d["password"] is not None:
-            d["hashed_password"] = utils.authorization.get_password_hash(d["password"])
-        del d["password"]
-    return d
-
-
-async def put_user(item: models.User, model: schemes.User, user: schemes.DisplayUser):
-    d = hash_user(model.dict())
-    await item.update(**d).apply()
-
-
-async def patch_user(item: models.User, model: schemes.User, user: schemes.DisplayUser):
-    d = hash_user(model.dict(exclude_unset=True))
-    await item.update(**d).apply()
+    return await utils.database.create_object(models.User, d)

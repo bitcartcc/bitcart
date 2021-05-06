@@ -2,7 +2,7 @@ import asyncio
 
 from sqlalchemy import or_, select
 
-from api import constants, crud, db, models, settings, utils
+from api import constants, models, settings, utils
 from api.ext.moneyformat import currency_table
 from api.logger import get_logger
 from api.utils.logging import log_errors
@@ -61,22 +61,21 @@ def get_pending_invoices_query(currency):
 
 async def iterate_pending_invoices(currency):
     with log_errors():  # connection issues
-        async with db.db.acquire() as conn:
-            async with conn.transaction():
-                async for method, invoice, xpub in get_pending_invoices_query(currency).gino.load(
-                    (models.PaymentMethod, models.Invoice, models.Wallet.xpub)
-                ).iterate():
-                    yield method, invoice, xpub
+        async with utils.database.iterate_helper():
+            async for method, invoice, xpub in get_pending_invoices_query(currency).gino.load(
+                (models.PaymentMethod, models.Invoice, models.Wallet.xpub)
+            ).iterate():
+                await invoice.load_data()
+                yield method, invoice, xpub
 
 
 async def make_expired_task(invoice):
-    crud.invoices.add_invoice_expiration(invoice)  # to ensure it is the most recent one
+    invoice.add_invoice_expiration()  # to ensure it is the most recent one
     left = invoice.time_left + 1  # to ensure it's already expired at that moment
     if left > 0:
         await asyncio.sleep(left)
     try:
-        invoice = await models.Invoice.get(invoice.id)  # refresh data to get new status
-        await crud.invoices.invoice_add_related(invoice)
+        invoice = await utils.database.get_object(models.Invoice, invoice.id)  # refresh data to get new status
     except Exception:
         return  # invoice deleted meantime
     if invoice.status == InvoiceStatus.PENDING:  # to ensure there are no duplicate notifications
@@ -107,13 +106,13 @@ async def new_payment_handler(instance, event, address, status, status_str):
         if not data:  # received payment but no matching invoice
             return
         method, invoice, xpub = data
+        await invoice.load_data()
         await mark_invoice_paid(invoice, method, xpub, status)
 
 
 async def update_confirmations(invoice, method, confirmations):
     await method.update(confirmations=confirmations).apply()
-    store = await models.Store.get(invoice.store_id)
-    await crud.stores.store_add_related(store)
+    store = await utils.database.get_object(models.Store, invoice.store_id)
     status = invoice.status
     if confirmations >= 1:
         status = InvoiceStatus.CONFIRMED
@@ -140,18 +139,17 @@ async def new_block_handler(instance, event, height):
                 or method.lightning
             ):
                 continue
+            await invoice.load_data()
             confirmations = await get_confirmations(method, xpub)
             if confirmations != method.confirmations:
                 await update_confirmations(invoice, method, confirmations)
 
 
 async def invoice_notification(invoice: models.Invoice, status: str):
-    await crud.invoices.invoice_add_related(invoice)
     await utils.notifications.send_ipn(invoice, status)
     if status == InvoiceStatus.COMPLETE:
         logger.info(f"Invoice {invoice.id} complete, sending notifications...")
-        store = await models.Store.get(invoice.store_id)
-        await crud.stores.store_add_related(store)
+        store = await utils.database.get_object(models.Store, invoice.store_id)
         await utils.notifications.notify(store, await utils.templates.get_notify_template(store, invoice))
         if invoice.products:
             if utils.email.check_ping(
@@ -163,26 +161,26 @@ async def invoice_notification(invoice: models.Invoice, status: str):
                 store.email_use_ssl,
             ):
                 messages = []
-                for product_id in invoice.products:
-                    product = await models.Product.get(product_id)
+                products = await utils.database.get_objects(models.Product, invoice.products)
+                for product in products:
                     product.price = currency_table.normalize(
                         invoice.currency, product.price
                     )  # to be formatted correctly in emails
                     relation = (
                         await models.ProductxInvoice.query.where(models.ProductxInvoice.invoice_id == invoice.id)
-                        .where(models.ProductxInvoice.product_id == product_id)
+                        .where(models.ProductxInvoice.product_id == product.id)
                         .gino.first()
                     )
                     quantity = relation.count
                     product_template = await utils.templates.get_product_template(store, product, quantity)
                     messages.append(product_template)
                     logger.debug(
-                        f"Invoice {invoice.id} email notification: rendered product template for product {product_id}:\n"
+                        f"Invoice {invoice.id} email notification: rendered product template for product {product.id}:\n"
                         f"{product_template}"
                     )
                 store_template = await utils.templates.get_store_template(store, messages)
                 logger.debug(f"Invoice {invoice.id} email notification: rendered final template:\n{store_template}")
-                utils.mail.send_mail(
+                utils.email.send_mail(
                     store,
                     invoice.buyer_email,
                     store_template,
@@ -218,11 +216,10 @@ async def update_status(invoice, status, method=None):
 
 async def create_expired_tasks():
     with log_errors():
-        async with db.db.acquire() as conn:
-            async with conn.transaction():
-                async for invoice in models.Invoice.query.where(get_pending_invoice_statuses()).gino.iterate():
-                    with log_errors():
-                        asyncio.ensure_future(make_expired_task(invoice))
+        async with utils.database.iterate_helper():
+            async for invoice in models.Invoice.query.where(get_pending_invoice_statuses()).gino.iterate():
+                with log_errors():
+                    asyncio.ensure_future(make_expired_task(invoice))
 
 
 async def check_pending(currency):
@@ -232,7 +229,7 @@ async def check_pending(currency):
                 continue
             coin = settings.get_coin(method.currency, xpub)
             if method.lightning:
-                invoice_data = await coin.server.get_invoice(method.rhash)  # TODO: add to SDK
+                invoice_data = await coin.get_invoice(method.rhash)
             else:
                 invoice_data = await coin.get_request(method.payment_address)
             await mark_invoice_paid(invoice, method, xpub, invoice_data["status"])
